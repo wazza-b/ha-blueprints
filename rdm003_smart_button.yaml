@@ -1,0 +1,93 @@
+blueprint:
+  name: Philips Hue Smart Button (RDM003) - ZHA (press + hold dim)
+  description: >
+    ZHA blueprint for Philips Hue Smart Button (RDM003).
+    - Press: zha_event cluster 6 command "on"
+    - Hold: cluster 8 command "step" (repeats while held)
+    - Release: cluster 8 command "stop"
+    Ignores attribute_updated to avoid double-firing.
+  domain: automation
+  input:
+    remote:
+      name: Hue Smart Button (RDM003)
+      selector:
+        device:
+          integration: zha
+          manufacturer: Signify Netherlands B.V.
+          multiple: false
+    dimmable_light:
+      name: Dimmable Light / Group (for hold dimming)
+      selector:
+        target:
+          entity:
+            domain: light
+    press_action:
+      name: Press action (short press)
+      default: []
+      selector:
+        action: {}
+    release_action:
+      name: Release action (optional)
+      default: []
+      selector:
+        action: {}
+    transition_seconds:
+      name: Transition seconds (for dim steps)
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: slider
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  cmd: "{{ trigger.event.data.command }}"
+  cluster: "{{ trigger.event.data.cluster_id }}"
+  step_mode: "{{ trigger.event.data.params.step_mode if trigger.event.data.params is defined else none }}"
+  step_size: "{{ trigger.event.data.params.step_size if trigger.event.data.params is defined else 0 }}"
+
+trigger:
+  - platform: event
+    event_type: zha_event
+    event_data:
+      device_id: !input remote
+
+condition:
+  # Only respond to the commands we care about; ignore attribute_updated
+  - condition: template
+    value_template: >
+      {{ cmd in ['on','off','step','stop'] and cmd != 'attribute_updated' }}
+
+action:
+  - choose:
+      # Short press
+      - conditions: "{{ cluster == 6 and cmd == 'on' }}"
+        sequence: !input press_action
+
+      # Hold-to-dim: step events (cluster 8)
+      # step_mode: 0 usually means "up", 1 means "down" (your logs show 1)
+      - conditions: "{{ cluster == 8 and cmd == 'step' }}"
+        sequence:
+          - choose:
+              - conditions: "{{ step_mode == 0 }}"
+                sequence:
+                  - action: light.turn_on
+                    target: !input dimmable_light
+                    data:
+                      brightness_step_pct: "{{ step_size }}"
+                      transition: !input transition_seconds
+              - conditions: "{{ step_mode == 1 }}"
+                sequence:
+                  - action: light.turn_on
+                    target: !input dimmable_light
+                    data:
+                      brightness_step_pct: "{{ -step_size }}"
+                      transition: !input transition_seconds
+
+      # Release
+      - conditions: "{{ cluster == 8 and cmd == 'stop' }}"
+        sequence: !input release_action
