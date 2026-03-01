@@ -65,7 +65,7 @@ condition:
 action:
   - choose:
       # Short press
-      - conditions: "{{ cluster == 6 and (cmd == 'on' OR cmd == 'off_with_effect') }}"
+      - conditions: "{{ cluster == 6 and cmd in ['on','off_with_effect'] }}"
         sequence: !input press_action
 
       # Hold-to-dim: step events (cluster 8)
