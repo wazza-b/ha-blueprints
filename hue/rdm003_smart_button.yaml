@@ -1,8 +1,8 @@
 blueprint:
-  name: Philips Hue Smart Button (RDM003) - ZHA (press + hold dim)
+  name: Philips Hue Smart Button (RDM003) - WB
   description: >
     ZHA blueprint for Philips Hue Smart Button (RDM003).
-    - Press: zha_event cluster 6 command "on"
+    - Press: toggles between (zha_event cluster 6 command "on") and (zha_event cluster 6 command "off_with_effect")
     - Hold: cluster 8 command "step" (repeats while held)
     - Release: cluster 8 command "stop"
     Ignores attribute_updated to avoid double-firing.
@@ -60,12 +60,12 @@ condition:
   # Only respond to the commands we care about; ignore attribute_updated
   - condition: template
     value_template: >
-      {{ cmd in ['on','off','step','stop'] and cmd != 'attribute_updated' }}
+      {{ cmd in ['on','off','off_with_effect','step','stop'] and cmd != 'attribute_updated' }}
 
 action:
   - choose:
       # Short press
-      - conditions: "{{ cluster == 6 and cmd == 'on' }}"
+      - conditions: "{{ cluster == 6 and (cmd == 'on' OR cmd == 'off_with_effect') }}"
         sequence: !input press_action
 
       # Hold-to-dim: step events (cluster 8)
