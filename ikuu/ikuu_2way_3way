@@ -2,9 +2,9 @@ blueprint:
   name: Light Sync - Master with Slaves (2-way/3-way/n-way)
   description: >
     Mirrors on/off state between a master light and one or more slave lights.
-    - Slave change -> master set to match
-    - Master change -> slaves set to match (LED sync)
-    Uses restart mode + debounce to handle rapid taps and Zigbee report lag.
+    Slave change -> master set to match.
+    Master change -> slaves set to match (LED sync).
+    Uses restart mode + debounce for fast taps / Zigbee lag.
   domain: automation
 
   input:
@@ -23,7 +23,6 @@ blueprint:
 
     debounce_ms:
       name: Debounce (milliseconds)
-      description: "Delay to let Zigbee state settle. Typical: 100–200ms."
       default: 150
       selector:
         number:
@@ -47,34 +46,25 @@ trigger:
     id: slave
 
 action:
-  - variables:
-      master: !input master_light
-      slaves: !input slave_lights
-
   - delay:
       milliseconds: !input debounce_ms
 
+  - variables:
+      desired: "{{ states(trigger.entity_id) }}"
+
   - choose:
-      # Slave -> Master
       - conditions:
           - condition: trigger
             id: slave
         sequence:
-          - variables:
-              desired: "{{ states(trigger.entity_id) }}"
-          - condition: template
-            value_template: "{{ states(master) != desired }}"
           - service: "light.turn_{{ desired }}"
             target:
-              entity_id: "{{ master }}"
+              entity_id: !input master_light
 
-      # Master -> Slaves
       - conditions:
           - condition: trigger
             id: master
         sequence:
-          - variables:
-              desired: "{{ states(master) }}"
           - service: "light.turn_{{ desired }}"
             target:
-              entity_id: "{{ slaves }}"
+              entity_id: !input slave_lights
