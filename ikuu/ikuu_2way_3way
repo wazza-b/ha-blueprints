@@ -1,49 +1,43 @@
 blueprint:
-  name: Light Sync - Master with Slaves (2-way/3-way/n-way)
+  name: Stable Multi-Way Light Sync (2-way / 3-way / n-way)
   description: >
-    Mirrors on/off state between a master light and one or more slave lights.
-    Slave change -> master set to match.
-    Master change -> slaves set to match (LED sync).
-    Uses restart mode + debounce for fast taps / Zigbee lag.
+    Synchronises multiple light entities so they behave like a true multi-way circuit.
+    - Only reacts to on/off transitions
+    - Only updates lights that differ
+    - Uses small debounce delay to avoid race conditions
+    Designed for Zigbee relay-style switches.
+
   domain: automation
 
   input:
-    master_light:
-      name: Master light (source of truth)
-      selector:
-        entity:
-          domain: light
-
-    slave_lights:
-      name: Slave lights (one or more)
+    lights:
+      name: Lights to sync
+      description: Select all light entities that should mirror each other.
       selector:
         entity:
           domain: light
           multiple: true
 
     debounce_ms:
-      name: Debounce (milliseconds)
-      default: 150
+      name: Debounce delay (milliseconds)
+      description: Small delay to allow Zigbee state to settle (typically 30–100ms).
+      default: 50
       selector:
         number:
           min: 0
-          max: 1000
-          unit_of_measurement: ms
+          max: 500
           step: 10
+          unit_of_measurement: ms
           mode: slider
 
 mode: restart
 
 trigger:
   - platform: state
-    entity_id: !input master_light
-    to: ["on", "off"]
-    id: master
-
-  - platform: state
-    entity_id: !input slave_lights
-    to: ["on", "off"]
-    id: slave
+    entity_id: !input lights
+    to:
+      - "on"
+      - "off"
 
 action:
   - delay:
@@ -51,20 +45,15 @@ action:
 
   - variables:
       desired: "{{ states(trigger.entity_id) }}"
+      all_lights: !input lights
 
-  - choose:
-      - conditions:
-          - condition: trigger
-            id: slave
-        sequence:
-          - service: "light.turn_{{ desired }}"
-            target:
-              entity_id: !input master_light
-
-      - conditions:
-          - condition: trigger
-            id: master
-        sequence:
-          - service: "light.turn_{{ desired }}"
-            target:
-              entity_id: !input slave_lights
+  - repeat:
+      for_each: "{{ all_lights }}"
+      sequence:
+        - condition: template
+          value_template: >
+            {{ repeat.item != trigger.entity_id and
+               states(repeat.item) != desired }}
+        - service: "light.turn_{{ desired }}"
+          target:
+            entity_id: "{{ repeat.item }}"
