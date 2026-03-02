@@ -1,0 +1,80 @@
+blueprint:
+  name: Light Sync - Master with Slaves (2-way/3-way/n-way)
+  description: >
+    Mirrors on/off state between a master light and one or more slave lights.
+    - Slave change -> master set to match
+    - Master change -> slaves set to match (LED sync)
+    Uses restart mode + debounce to handle rapid taps and Zigbee report lag.
+  domain: automation
+
+  input:
+    master_light:
+      name: Master light (source of truth)
+      selector:
+        entity:
+          domain: light
+
+    slave_lights:
+      name: Slave lights (one or more)
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    debounce_ms:
+      name: Debounce (milliseconds)
+      description: "Delay to let Zigbee state settle. Typical: 100–200ms."
+      default: 150
+      selector:
+        number:
+          min: 0
+          max: 1000
+          unit_of_measurement: ms
+          step: 10
+          mode: slider
+
+mode: restart
+
+trigger:
+  - platform: state
+    entity_id: !input master_light
+    to: ["on", "off"]
+    id: master
+
+  - platform: state
+    entity_id: !input slave_lights
+    to: ["on", "off"]
+    id: slave
+
+action:
+  - delay:
+      milliseconds: !input debounce_ms
+
+  - choose:
+      # Slave -> Master
+      - conditions:
+          - condition: trigger
+            id: slave
+        sequence:
+          - variables:
+              desired: "{{ states(trigger.entity_id) }}"
+              master: !input master_light
+          - condition: template
+            value_template: "{{ states(master) != desired }}"
+          - service: "light.turn_{{ desired }}"
+            target:
+              entity_id: !input master_light
+
+      # Master -> Slaves
+      - conditions:
+          - condition: trigger
+            id: master
+        sequence:
+          - variables:
+              desired: "{{ states(!input master_light) }}"
+              slaves: !input slave_lights
+          # Only send to slaves that are not already correct
+          - service: "light.turn_{{ desired }}"
+            target:
+              entity_id: >
+                {{ slaves | select('ne', none) | list }}
