@@ -1,15 +1,16 @@
 blueprint:
-  name: Vacancy turn-off (periodic re-check, PIR now / mmWave later)
+  name: Vacancy actions (periodic re-check, PIR now / mmWave later)
   description: >
-    Turns selected entities off once all selected occupancy sensors have been
-    off for the configured timeout. Uses a periodic re-check instead of a
-    single "state: off for:" event, so it can still fire later if the first
+    Runs user-defined actions once all selected occupancy sensors have been off
+    for the configured timeout. Uses a periodic re-check instead of a single
+    "state: off for:" trigger, so it can still fire later if the first
     opportunity was missed.
 
     Use PIR sensors now. Later, add mmWave sensors to the optional
     "additional presence sensors" input.
 
   domain: automation
+
   input:
     motion_sensors:
       name: Motion sensors
@@ -32,7 +33,7 @@ blueprint:
 
     vacancy_minutes:
       name: Vacancy timeout (minutes)
-      description: How long all sensors must be off before turn-off runs.
+      description: How long all sensors must be off before actions run.
       default: 30
       selector:
         number:
@@ -42,12 +43,13 @@ blueprint:
           mode: box
           unit_of_measurement: min
 
-    off_target:
-      name: Entities to turn off
-      description: Lights, switches, fans, etc.
+    vacancy_actions:
+      name: Actions to run on vacancy
+      description: >
+        These actions will run when the room has been vacant for the configured
+        timeout. You can add light, climate, scene, script, delay, choose, etc.
       selector:
-        target:
-          entity: {}
+        action: {}
 
 mode: single
 
@@ -57,14 +59,14 @@ variables:
   vacancy_minutes: !input vacancy_minutes
   all_sensors: "{{ motion_sensors + additional_presence_sensors }}"
 
-triggers:
-  - trigger: time_pattern
+trigger:
+  - platform: time_pattern
     minutes: "/1"
 
-  - trigger: homeassistant
+  - platform: homeassistant
     event: start
 
-conditions:
+condition:
   - condition: template
     value_template: >
       {% set sensors = expand(all_sensors) | list %}
@@ -81,6 +83,4 @@ conditions:
       {% set latest_change = sensors | map(attribute='last_changed') | map('as_timestamp') | max %}
       {{ (as_timestamp(now()) - latest_change) >= (vacancy_minutes | int * 60) }}
 
-actions:
-  - action: homeassistant.turn_off
-    target: !input off_target
+action: !input vacancy_actions
