@@ -1,0 +1,86 @@
+blueprint:
+  name: Vacancy turn-off (periodic re-check, PIR now / mmWave later)
+  description: >
+    Turns selected entities off once all selected occupancy sensors have been
+    off for the configured timeout. Uses a periodic re-check instead of a
+    single "state: off for:" event, so it can still fire later if the first
+    opportunity was missed.
+
+    Use PIR sensors now. Later, add mmWave sensors to the optional
+    "additional presence sensors" input.
+
+  domain: automation
+  input:
+    motion_sensors:
+      name: Motion sensors
+      description: One or more PIR/motion binary sensors.
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+    additional_presence_sensors:
+      name: Additional presence sensors (optional)
+      description: >
+        Optional extra sensors such as mmWave presence sensors. Leave blank for
+        PIR-only rooms.
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+    vacancy_minutes:
+      name: Vacancy timeout (minutes)
+      description: How long all sensors must be off before turn-off runs.
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 240
+          step: 1
+          mode: box
+          unit_of_measurement: min
+
+    off_target:
+      name: Entities to turn off
+      description: Lights, switches, fans, etc.
+      selector:
+        target:
+          entity: {}
+
+mode: single
+
+variables:
+  motion_sensors: !input motion_sensors
+  additional_presence_sensors: !input additional_presence_sensors
+  vacancy_minutes: !input vacancy_minutes
+  all_sensors: "{{ motion_sensors + additional_presence_sensors }}"
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+
+  - trigger: homeassistant
+    event: start
+
+conditions:
+  - condition: template
+    value_template: >
+      {% set sensors = expand(all_sensors) | list %}
+      {{ sensors | count > 0 }}
+
+  - condition: template
+    value_template: >
+      {% set sensors = expand(all_sensors) | list %}
+      {{ (sensors | selectattr('state', 'eq', 'on') | list | count) == 0 }}
+
+  - condition: template
+    value_template: >
+      {% set sensors = expand(all_sensors) | list %}
+      {% set latest_change = sensors | map(attribute='last_changed') | map('as_timestamp') | max %}
+      {{ (as_timestamp(now()) - latest_change) >= (vacancy_minutes | int * 60) }}
+
+actions:
+  - action: homeassistant.turn_off
+    target: !input off_target
