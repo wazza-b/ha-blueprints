@@ -1,30 +1,39 @@
 blueprint:
-  name: Enforce Light On During Time Window, Off After
-  description: Keeps a light entity on during a time window, then turns it off after the window. Useful for light-presented switches such as heated towel rails.
+  name: Heated Towel Rail - Free Window + Manual Timer
+  description: >
+    Keeps a light-presented heated towel rail on during a free-power window,
+    turns it off at the end, and allows manual use outside the window with
+    an auto-off timer.
   domain: automation
 
   input:
     target_light:
-      name: Target light
+      name: Towel rail light entity
       selector:
         entity:
           domain: light
 
+    timer_helper:
+      name: Timer helper
+      selector:
+        entity:
+          domain: timer
+
     start_time:
-      name: Start time
+      name: Free power start
       default: "11:00:00"
       selector:
         time: {}
 
     end_time:
-      name: End time
+      name: Free power end
       default: "14:00:00"
       selector:
         time: {}
 
-    check_interval_minutes:
-      name: Watchdog interval minutes
-      default: "/1"
+    watchdog_minutes:
+      name: Watchdog interval
+      default: "/5"
       selector:
         text: {}
 
@@ -33,42 +42,96 @@ mode: single
 trigger:
   - platform: time
     at: !input start_time
+    id: window_start
 
   - platform: time
     at: !input end_time
+    id: window_end
 
   - platform: homeassistant
     event: start
+    id: ha_start
 
   - platform: time_pattern
-    minutes: !input check_interval_minutes
+    minutes: !input watchdog_minutes
+    id: watchdog
+
+  - platform: state
+    entity_id: !input target_light
+    to: "on"
+    id: rail_on
+
+  - platform: event
+    event_type: timer.finished
+    event_data:
+      entity_id: !input timer_helper
+    id: timer_finished
 
 variables:
   target_light: !input target_light
+  timer_helper: !input timer_helper
   start_time: !input start_time
   end_time: !input end_time
   now_time: "{{ now().strftime('%H:%M:%S') }}"
-  in_window: "{{ start_time <= now_time < end_time }}"
-  after_window: "{{ now_time >= end_time }}"
+  in_free_window: "{{ start_time <= now_time < end_time }}"
 
 action:
   - choose:
+      # During free window, keep towel rail on.
       - conditions:
           - condition: template
-            value_template: "{{ in_window }}"
-          - condition: template
-            value_template: "{{ is_state(target_light, 'off') }}"
+            value_template: "{{ in_free_window }}"
+          - condition: state
+            entity_id: !input target_light
+            state: "off"
         sequence:
-          - service: light.turn_on
+          - action: light.turn_on
             target:
-              entity_id: "{{ target_light }}"
+              entity_id: !input target_light
 
+      # At 2pm/end time, force off and cancel timer.
+      - conditions:
+          - condition: trigger
+            id: window_end
+        sequence:
+          - action: light.turn_off
+            target:
+              entity_id: !input target_light
+          - action: timer.cancel
+            target:
+              entity_id: !input timer_helper
+
+      # Manual use outside free window starts/restarts 30 min timer.
+      - conditions:
+          - condition: trigger
+            id: rail_on
+          - condition: template
+            value_template: "{{ not in_free_window }}"
+        sequence:
+          - action: timer.start
+            target:
+              entity_id: !input timer_helper
+
+      # Timer finished: turn off.
+      - conditions:
+          - condition: trigger
+            id: timer_finished
+        sequence:
+          - action: light.turn_off
+            target:
+              entity_id: !input target_light
+
+      # Safety catch: outside window, if rail is on but timer is not active, turn it off.
       - conditions:
           - condition: template
-            value_template: "{{ after_window }}"
-          - condition: template
-            value_template: "{{ is_state(target_light, 'on') }}"
+            value_template: "{{ not in_free_window }}"
+          - condition: state
+            entity_id: !input target_light
+            state: "on"
+          - condition: state
+            entity_id: !input timer_helper
+            state: "idle"
         sequence:
-          - service: light.turn_off
+          - action: light.turn_off
             target:
-              entity_id: "{{ target_light }}"
+              entity_id: !input target_light
